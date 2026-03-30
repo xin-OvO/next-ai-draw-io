@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { getApiEndpoint } from "@/lib/base-path"
+import { resolveOpenAICodexAuth } from "@/lib/openai-codex-auth"
 import type { FlattenedServerModel } from "@/lib/server-model-config"
 import { STORAGE_KEYS } from "@/lib/storage"
 import {
@@ -376,6 +377,7 @@ export function getSelectedAIConfig(): {
     aiProvider: string
     aiBaseUrl: string
     aiApiKey: string
+    aiAuthProfileId: string
     aiModel: string
     // AWS Bedrock credentials
     awsAccessKeyId: string
@@ -392,6 +394,7 @@ export function getSelectedAIConfig(): {
         aiProvider: "",
         aiBaseUrl: "",
         aiApiKey: "",
+        aiAuthProfileId: "",
         aiModel: "",
         awsAccessKeyId: "",
         awsSecretAccessKey: "",
@@ -415,6 +418,7 @@ export function getSelectedAIConfig(): {
             aiProvider: localStorage.getItem(OLD_KEYS.aiProvider) || "",
             aiBaseUrl: localStorage.getItem(OLD_KEYS.aiBaseUrl) || "",
             aiApiKey: localStorage.getItem(OLD_KEYS.aiApiKey) || "",
+            aiAuthProfileId: "",
             aiModel: localStorage.getItem(OLD_KEYS.aiModel) || "",
             // Old format didn't support AWS
             awsAccessKeyId: "",
@@ -453,6 +457,7 @@ export function getSelectedAIConfig(): {
             aiProvider: nameSlug,
             aiBaseUrl: "",
             aiApiKey: "",
+            aiAuthProfileId: "",
             aiModel: modelId,
             selectedModelId: config.selectedModelId,
         }
@@ -469,6 +474,7 @@ export function getSelectedAIConfig(): {
         aiProvider: model.provider,
         aiBaseUrl: model.baseUrl || "",
         aiApiKey: model.apiKey,
+        aiAuthProfileId: model.authProfileId || "",
         aiModel: model.modelId,
         // AWS Bedrock credentials
         awsAccessKeyId: model.awsAccessKeyId || "",
@@ -478,5 +484,37 @@ export function getSelectedAIConfig(): {
         selectedModelId: config.selectedModelId || "",
         // Vertex AI credentials (Express Mode)
         vertexApiKey: model.vertexApiKey || "",
+    }
+}
+
+export async function resolveSelectedAIConfig(): Promise<{
+    accessCode: string
+    aiProvider: string
+    aiBaseUrl: string
+    aiApiKey: string
+    aiAuthProfileId: string
+    aiModel: string
+    awsAccessKeyId: string
+    awsSecretAccessKey: string
+    awsRegion: string
+    awsSessionToken: string
+    selectedModelId: string
+    vertexApiKey: string
+}> {
+    const config = getSelectedAIConfig()
+
+    if (config.aiProvider !== "openai-codex") {
+        return config
+    }
+
+    if (!config.aiAuthProfileId) {
+        throw new Error("请先连接 OpenAI Codex OAuth。")
+    }
+
+    const resolved = await resolveOpenAICodexAuth(config.aiAuthProfileId)
+    return {
+        ...config,
+        aiApiKey: resolved.apiKey,
+        aiAuthProfileId: resolved.profileId,
     }
 }

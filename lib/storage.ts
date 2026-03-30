@@ -21,6 +21,7 @@ export const STORAGE_KEYS = {
     // Multi-model configuration
     modelConfigs: "next-ai-draw-io-model-configs",
     selectedModelId: "next-ai-draw-io-selected-model-id",
+    authProfiles: "next-ai-draw-io-auth-profiles",
 
     // Chat input preferences
     sendShortcut: "next-ai-draw-io-send-shortcut",

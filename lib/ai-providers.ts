@@ -9,6 +9,11 @@ import { createOpenAI, openai } from "@ai-sdk/openai"
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
 import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 import { createOllama, ollama } from "ollama-ai-provider-v2"
+import {
+    buildOpenAICodexHeaders,
+    createOpenAICodexFetch,
+    OPENAI_CODEX_BASE_URL,
+} from "@/lib/openai-codex-protocol"
 import { PROVIDER_INFO, type ProviderName } from "@/lib/types/model-config"
 
 export type { ProviderName }
@@ -79,6 +84,7 @@ export interface ClientOverrides {
 // Providers that can be selected from client settings
 const ALLOWED_CLIENT_PROVIDERS: ProviderName[] = [
     "openai",
+    "openai-codex",
     "anthropic",
     "google",
     "vertexai",
@@ -242,7 +248,8 @@ function buildProviderOptions(
     const options: Record<string, any> = {}
 
     switch (provider) {
-        case "openai": {
+        case "openai":
+        case "openai-codex": {
             const reasoningEffort = process.env.OPENAI_REASONING_EFFORT
             const reasoningSummary = process.env.OPENAI_REASONING_SUMMARY
 
@@ -537,6 +544,7 @@ function buildProviderOptions(
 const PROVIDER_ENV_VARS: Record<ProviderName, string | null> = {
     bedrock: null, // AWS SDK auto-uses IAM role on AWS, or env vars locally
     openai: "OPENAI_API_KEY",
+    "openai-codex": null,
     anthropic: "ANTHROPIC_API_KEY",
     google: "GOOGLE_GENERATIVE_AI_API_KEY",
     vertexai: "GOOGLE_VERTEX_API_KEY",
@@ -826,6 +834,24 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
             } else {
                 model = openai(modelId)
             }
+            break
+        }
+
+        case "openai-codex": {
+            const apiKey = overrides?.apiKey
+            if (!apiKey) {
+                throw new Error(
+                    "OpenAI Codex provider requires a resolved OAuth bearer token.",
+                )
+            }
+
+            const openaiCodex = createOpenAI({
+                apiKey,
+                baseURL: OPENAI_CODEX_BASE_URL,
+                headers: buildOpenAICodexHeaders(apiKey),
+                fetch: createOpenAICodexFetch(),
+            })
+            model = openaiCodex(modelId)
             break
         }
 
@@ -1285,7 +1311,7 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
 
         default:
             throw new Error(
-                `Unknown AI provider: ${provider}. Supported providers: bedrock, openai, anthropic, google, azure, ollama, openrouter, deepseek, siliconflow, sglang, gateway, edgeone, doubao, modelscope, glm, qwen, qiniu, kimi, minimax`,
+                `Unknown AI provider: ${provider}. Supported providers: bedrock, openai, openai-codex, anthropic, google, azure, ollama, openrouter, deepseek, siliconflow, sglang, gateway, edgeone, doubao, modelscope, glm, qwen, qiniu, kimi, minimax`,
             )
     }
 

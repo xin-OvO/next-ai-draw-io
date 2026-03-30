@@ -6,6 +6,13 @@ import {
     supportsPromptCaching,
 } from "@/lib/ai-providers"
 
+function createJwt(payload: Record<string, unknown>): string {
+    const encode = (value: Record<string, unknown>) =>
+        Buffer.from(JSON.stringify(value)).toString("base64url")
+
+    return `${encode({ alg: "none", typ: "JWT" })}.${encode(payload)}.signature`
+}
+
 describe("resolveBaseURL", () => {
     const SERVER_BASE_URL = "https://server-proxy.example.com"
     const USER_BASE_URL = "https://user-proxy.example.com"
@@ -342,5 +349,23 @@ describe("Ollama API key security", () => {
         const callArgs = createOllamaMock.mock.calls[0][0]
         expect(callArgs.baseURL).toBe("https://my-ollama.com")
         expect(callArgs).not.toHaveProperty("headers")
+    })
+})
+
+describe("OpenAI Codex provider", () => {
+    it("accepts client-resolved OAuth bearer tokens without OPENAI_API_KEY", () => {
+        const oauthAccessToken = createJwt({
+            "https://api.openai.com/auth": {
+                chatgpt_account_id: "acct_123",
+            },
+        })
+
+        expect(() =>
+            getAIModel({
+                provider: "openai-codex",
+                apiKey: oauthAccessToken,
+                modelId: "gpt-5.4",
+            }),
+        ).not.toThrow()
     })
 })

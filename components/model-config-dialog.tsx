@@ -21,6 +21,7 @@ import {
     Zap,
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
 import {
     AlertDialog,
     AlertDialogAction,
@@ -52,7 +53,13 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { useDictionary } from "@/hooks/use-dictionary"
 import type { UseModelConfigReturn } from "@/hooks/use-model-config"
+import { getApiEndpoint } from "@/lib/base-path"
 import { formatMessage } from "@/lib/i18n/utils"
+import {
+    getOpenAICodexProfile,
+    resolveOpenAICodexAuth,
+    upsertOpenAICodexProfile,
+} from "@/lib/openai-codex-auth"
 import type { ProviderConfig, ProviderName } from "@/lib/types/model-config"
 import {
     PROVIDER_INFO,
@@ -166,6 +173,22 @@ export function ModelConfigDialog({
         modelId: string
         message: string
     } | null>(null)
+    const [oauthSession, setOauthSession] = useState<{
+        sessionId: string
+        status:
+            | "starting"
+            | "awaiting_browser"
+            | "awaiting_manual_input"
+            | "completed"
+            | "error"
+        authUrl?: string
+        instructions?: string
+        progress?: string
+        prompt?: { message: string; placeholder?: string }
+        error?: string
+    } | null>(null)
+    const [manualCodeInput, setManualCodeInput] = useState("")
+    const oauthPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
     const {
         config,
@@ -181,6 +204,10 @@ export function ModelConfigDialog({
     const selectedProvider = config.providers.find(
         (p) => p.id === selectedProviderId,
     )
+    const selectedOpenAICodexProfile =
+        selectedProvider?.provider === "openai-codex"
+            ? getOpenAICodexProfile(selectedProvider.authProfileId)
+            : null
 
     // Cleanup validation reset timeout on unmount
     useEffect(() => {
@@ -188,8 +215,144 @@ export function ModelConfigDialog({
             if (validationResetTimeoutRef.current) {
                 clearTimeout(validationResetTimeoutRef.current)
             }
+            if (oauthPollRef.current) {
+                clearInterval(oauthPollRef.current)
+            }
         }
     }, [])
+
+    const stopOAuthPolling = useCallback(() => {
+        if (oauthPollRef.current) {
+            clearInterval(oauthPollRef.current)
+            oauthPollRef.current = null
+        }
+    }, [])
+
+    const pollOpenAICodexSession = useCallback(
+        async (sessionId: string) => {
+            const response = await fetch(
+                `${getApiEndpoint("/api/openai-codex-oauth")}?sessionId=${encodeURIComponent(sessionId)}`,
+            )
+            const data = await response.json()
+
+            if (!response.ok) {
+                throw new Error(data.error || "OAuth session polling failed")
+            }
+
+            setOauthSession(data)
+
+            if (data.status === "completed" && data.credentials) {
+                stopOAuthPolling()
+                const resolved = upsertOpenAICodexProfile(data.credentials)
+                if (selectedProviderId) {
+                    updateProvider(selectedProviderId, {
+                        authProfileId: resolved.profileId,
+                        apiKey: "",
+                        validated: false,
+                    })
+                }
+                setValidationStatus("idle")
+                setManualCodeInput("")
+                toast.success("OpenAI Codex OAuth 已连接")
+            } else if (data.status === "error") {
+                stopOAuthPolling()
+                toast.error(data.error || "OpenAI Codex OAuth failed")
+            }
+        },
+        [selectedProviderId, stopOAuthPolling, updateProvider],
+    )
+
+    const handleStartOpenAICodexOAuth = useCallback(async () => {
+        try {
+            setOauthSession({
+                sessionId: "",
+                status: "starting",
+            })
+            setManualCodeInput("")
+
+            const response = await fetch(
+                getApiEndpoint("/api/openai-codex-oauth"),
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "start" }),
+                },
+            )
+            const data = await response.json()
+
+            if (!response.ok) {
+                throw new Error(data.error || "Failed to start OAuth flow")
+            }
+
+            setOauthSession(data)
+
+            if (data.authUrl) {
+                window.open(data.authUrl, "_blank", "noopener,noreferrer")
+            }
+
+            stopOAuthPolling()
+            oauthPollRef.current = setInterval(() => {
+                void pollOpenAICodexSession(data.sessionId)
+            }, 1000)
+        } catch (error) {
+            setOauthSession({
+                sessionId: "",
+                status: "error",
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : "OpenAI Codex OAuth failed",
+            })
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "OpenAI Codex OAuth failed",
+            )
+        }
+    }, [pollOpenAICodexSession, stopOAuthPolling])
+
+    const handleSubmitOpenAICodexManualInput = useCallback(async () => {
+        if (!oauthSession?.sessionId || !manualCodeInput.trim()) return
+
+        try {
+            const response = await fetch(
+                getApiEndpoint("/api/openai-codex-oauth"),
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        action: "submit",
+                        sessionId: oauthSession.sessionId,
+                        input: manualCodeInput.trim(),
+                    }),
+                },
+            )
+            const data = await response.json()
+            if (!response.ok) {
+                throw new Error(data.error || "Failed to submit OAuth code")
+            }
+            setOauthSession(data)
+            setManualCodeInput("")
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : "Failed to submit OAuth code",
+            )
+        }
+    }, [manualCodeInput, oauthSession?.sessionId])
+
+    const handleDisconnectOpenAICodexOAuth = useCallback(() => {
+        if (!selectedProviderId) return
+
+        updateProvider(selectedProviderId, {
+            authProfileId: undefined,
+            validated: false,
+        })
+        setOauthSession(null)
+        setManualCodeInput("")
+        toast.success("OpenAI Codex OAuth 已断开")
+    }, [selectedProviderId, updateProvider])
 
     // Get suggested models for current provider
     const suggestedModels = selectedProvider
@@ -267,6 +430,7 @@ export function ModelConfigDialog({
 
         // Check credentials based on provider type
         const isBedrock = selectedProvider.provider === "bedrock"
+        const isOpenAICodex = selectedProvider.provider === "openai-codex"
         const isEdgeOne = selectedProvider.provider === "edgeone"
         const isOllama = selectedProvider.provider === "ollama"
         const isVertexAI = selectedProvider.provider === "vertexai"
@@ -281,6 +445,12 @@ export function ModelConfigDialog({
         } else if (isVertexAI) {
             // Vertex AI requires vertexApiKey for Express Mode
             if (!selectedProvider.vertexApiKey) {
+                return
+            }
+        } else if (isOpenAICodex) {
+            if (!selectedProvider.authProfileId) {
+                setValidationError("Connect OpenAI Codex OAuth first")
+                setValidationStatus("error")
                 return
             }
         } else if (!isEdgeOne && !isOllama && !selectedProvider.apiKey) {
@@ -306,17 +476,34 @@ export function ModelConfigDialog({
             setValidatingModelIndex(i)
 
             try {
+                let apiKey = selectedProvider.apiKey
+
+                if (isOpenAICodex && selectedProvider.authProfileId) {
+                    const resolved = await resolveOpenAICodexAuth(
+                        selectedProvider.authProfileId,
+                    )
+                    apiKey = resolved.apiKey
+
+                    if (resolved.profileId !== selectedProvider.authProfileId) {
+                        updateProvider(selectedProviderId, {
+                            authProfileId: resolved.profileId,
+                        })
+                    }
+                }
+
                 // For EdgeOne, construct baseUrl from current origin
                 const baseUrl = isEdgeOne
                     ? `${window.location.origin}/api/edgeai`
-                    : selectedProvider.baseUrl
+                    : isOpenAICodex
+                      ? undefined
+                      : selectedProvider.baseUrl
 
                 const response = await fetch("/api/validate-model", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         provider: selectedProvider.provider,
-                        apiKey: selectedProvider.apiKey,
+                        apiKey,
                         baseUrl,
                         modelId: model.modelId,
                         // AWS Bedrock credentials
@@ -1017,6 +1204,246 @@ export function ModelConfigDialog({
                                                     </div>
                                                 </>
                                             ) : selectedProvider.provider ===
+                                              "openai-codex" ? (
+                                                <div className="space-y-4">
+                                                    <div className="rounded-xl border border-border-subtle bg-surface-1/60 p-4 space-y-3">
+                                                        <div className="flex items-start justify-between gap-3">
+                                                            <div className="space-y-1">
+                                                                <p className="text-sm font-medium">
+                                                                    ChatGPT Plus
+                                                                    / Pro OAuth
+                                                                </p>
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    OAuth 仅用于
+                                                                    `openai-codex`
+                                                                    provider；普通
+                                                                    `openai`
+                                                                    仍然只走 API
+                                                                    Key。
+                                                                </p>
+                                                            </div>
+                                                            {selectedOpenAICodexProfile ? (
+                                                                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-success-muted text-success">
+                                                                    <Check className="h-3.5 w-3.5" />
+                                                                    <span className="text-xs font-medium">
+                                                                        Connected
+                                                                    </span>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted text-muted-foreground">
+                                                                    <Clock className="h-3.5 w-3.5" />
+                                                                    <span className="text-xs font-medium">
+                                                                        Not
+                                                                        connected
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {selectedOpenAICodexProfile ? (
+                                                            <div className="space-y-1 text-xs text-muted-foreground">
+                                                                <p>
+                                                                    Profile:{" "}
+                                                                    <span className="font-mono text-foreground">
+                                                                        {
+                                                                            selectedProvider.authProfileId
+                                                                        }
+                                                                    </span>
+                                                                </p>
+                                                                <p>
+                                                                    Expires:{" "}
+                                                                    <span className="font-mono text-foreground">
+                                                                        {new Date(
+                                                                            selectedOpenAICodexProfile.expires,
+                                                                        ).toLocaleString()}
+                                                                    </span>
+                                                                </p>
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-xs text-muted-foreground">
+                                                                认证成功后会把
+                                                                OAuth profile
+                                                                写入本地存储，并在每次请求前自动检查过期时间。
+                                                            </p>
+                                                        )}
+
+                                                        {oauthSession && (
+                                                            <div className="rounded-lg border border-border-subtle bg-surface-0/80 p-3 space-y-2">
+                                                                <p className="text-xs font-medium">
+                                                                    OAuth
+                                                                    status:{" "}
+                                                                    {
+                                                                        oauthSession.status
+                                                                    }
+                                                                </p>
+                                                                {oauthSession.progress && (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {
+                                                                            oauthSession.progress
+                                                                        }
+                                                                    </p>
+                                                                )}
+                                                                {oauthSession.instructions && (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {
+                                                                            oauthSession.instructions
+                                                                        }
+                                                                    </p>
+                                                                )}
+                                                                {oauthSession.authUrl && (
+                                                                    <button
+                                                                        type="button"
+                                                                        className="text-xs text-primary underline underline-offset-4"
+                                                                        onClick={() =>
+                                                                            window.open(
+                                                                                oauthSession.authUrl,
+                                                                                "_blank",
+                                                                                "noopener,noreferrer",
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        Open
+                                                                        OAuth
+                                                                        page
+                                                                    </button>
+                                                                )}
+                                                                {oauthSession.status ===
+                                                                    "awaiting_manual_input" && (
+                                                                    <div className="space-y-2">
+                                                                        <Input
+                                                                            value={
+                                                                                manualCodeInput
+                                                                            }
+                                                                            onChange={(
+                                                                                e,
+                                                                            ) =>
+                                                                                setManualCodeInput(
+                                                                                    e
+                                                                                        .target
+                                                                                        .value,
+                                                                                )
+                                                                            }
+                                                                            placeholder={
+                                                                                oauthSession
+                                                                                    .prompt
+                                                                                    ?.placeholder ||
+                                                                                "Paste redirect URL or code"
+                                                                            }
+                                                                            className="h-9 font-mono text-xs"
+                                                                        />
+                                                                        <Button
+                                                                            size="sm"
+                                                                            onClick={
+                                                                                handleSubmitOpenAICodexManualInput
+                                                                            }
+                                                                            disabled={
+                                                                                !manualCodeInput.trim()
+                                                                            }
+                                                                        >
+                                                                            Submit
+                                                                        </Button>
+                                                                    </div>
+                                                                )}
+                                                                {oauthSession.error && (
+                                                                    <p className="text-xs text-destructive">
+                                                                        {
+                                                                            oauthSession.error
+                                                                        }
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="flex items-center gap-2">
+                                                        <Button
+                                                            size="sm"
+                                                            onClick={
+                                                                handleStartOpenAICodexOAuth
+                                                            }
+                                                            disabled={
+                                                                oauthSession?.status ===
+                                                                    "starting" ||
+                                                                oauthSession?.status ===
+                                                                    "awaiting_browser"
+                                                            }
+                                                        >
+                                                            {oauthSession?.status ===
+                                                            "starting" ? (
+                                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                            ) : selectedOpenAICodexProfile ? (
+                                                                "Reconnect"
+                                                            ) : (
+                                                                "Connect OAuth"
+                                                            )}
+                                                        </Button>
+
+                                                        <Button
+                                                            variant={
+                                                                validationStatus ===
+                                                                "success"
+                                                                    ? "outline"
+                                                                    : "default"
+                                                            }
+                                                            size="sm"
+                                                            onClick={
+                                                                handleValidate
+                                                            }
+                                                            disabled={
+                                                                !selectedProvider.authProfileId ||
+                                                                validationStatus ===
+                                                                    "validating"
+                                                            }
+                                                            className={cn(
+                                                                "h-9 px-4",
+                                                                validationStatus ===
+                                                                    "success" &&
+                                                                    "text-success border-success/30 bg-success-muted hover:bg-success-muted",
+                                                            )}
+                                                        >
+                                                            {validationStatus ===
+                                                            "validating" ? (
+                                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                            ) : validationStatus ===
+                                                              "success" ? (
+                                                                <>
+                                                                    <Check className="h-4 w-4 mr-1.5 animate-check-pop" />
+                                                                    {
+                                                                        dict
+                                                                            .modelConfig
+                                                                            .verified
+                                                                    }
+                                                                </>
+                                                            ) : (
+                                                                dict.modelConfig
+                                                                    .test
+                                                            )}
+                                                        </Button>
+
+                                                        {selectedProvider.authProfileId && (
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={
+                                                                    handleDisconnectOpenAICodexOAuth
+                                                                }
+                                                            >
+                                                                Disconnect
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                    {validationStatus ===
+                                                        "error" &&
+                                                        validationError && (
+                                                            <p className="text-xs text-destructive flex items-center gap-1">
+                                                                <X className="h-3 w-3" />
+                                                                {
+                                                                    validationError
+                                                                }
+                                                            </p>
+                                                        )}
+                                                </div>
+                                            ) : selectedProvider.provider ===
                                               "edgeone" ? (
                                                 <div className="space-y-3">
                                                     <div className="flex items-center gap-2">
@@ -1676,7 +2103,9 @@ export function ModelConfigDialog({
                         </div>
                         <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                             <Key className="h-3 w-3" />
-                            {dict.modelConfig.apiKeyStored}
+                            {selectedProvider?.provider === "openai-codex"
+                                ? "OAuth credentials are stored locally in your browser"
+                                : dict.modelConfig.apiKeyStored}
                         </p>
                     </div>
                 </div>

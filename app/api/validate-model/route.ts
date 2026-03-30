@@ -10,6 +10,12 @@ import { generateText } from "ai"
 import { NextResponse } from "next/server"
 import { createOllama } from "ollama-ai-provider-v2"
 import { normalizeMiniMaxBaseURL } from "@/lib/ai-providers"
+import {
+    buildOpenAICodexHeaders,
+    normalizeOpenAICodexRequestBody,
+    OPENAI_CODEX_DEFAULT_INSTRUCTIONS,
+    resolveOpenAICodexResponsesUrl,
+} from "@/lib/openai-codex-protocol"
 import { allowPrivateUrls, isPrivateUrl } from "@/lib/ssrf-protection"
 import { PROVIDER_INFO, type ProviderName } from "@/lib/types/model-config"
 
@@ -26,6 +32,77 @@ interface ValidateRequest {
     awsRegion?: string
     // Vertex AI specific
     vertexApiKey?: string // Express Mode API key
+}
+
+async function validateOpenAICodexStreaming(params: {
+    apiKey: string
+    modelId: string
+    baseUrl?: string
+}): Promise<NextResponse> {
+    const startTime = Date.now()
+    const response = await fetch(
+        resolveOpenAICodexResponsesUrl(params.baseUrl),
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "text/event-stream",
+                Authorization: `Bearer ${params.apiKey}`,
+                ...buildOpenAICodexHeaders(params.apiKey),
+            },
+            body: JSON.stringify(
+                normalizeOpenAICodexRequestBody(
+                    {
+                        model: params.modelId,
+                        stream: true,
+                        input: [
+                            {
+                                role: "user",
+                                content: [
+                                    {
+                                        type: "input_text",
+                                        text: "Reply with the word ok.",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    OPENAI_CODEX_DEFAULT_INSTRUCTIONS,
+                ),
+            ),
+        },
+    )
+
+    if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(
+            `OpenAI Codex API error (${response.status}): ${errorText}`,
+        )
+    }
+
+    if (response.body) {
+        const reader = response.body.getReader()
+        try {
+            const { done, value } = await reader.read()
+            if (done || !value || value.length === 0) {
+                throw new Error("OpenAI Codex streaming response was empty")
+            }
+        } finally {
+            reader.cancel().catch(() => {
+                /* Ignore cancellation errors */
+            })
+        }
+    } else {
+        throw new Error(
+            `OpenAI Codex validation returned no response body (content-type: ${response.headers.get("content-type") || "unknown"})`,
+        )
+    }
+
+    return NextResponse.json({
+        valid: true,
+        responseTime: Date.now() - startTime,
+        note: "OpenAI Codex model validated (using streaming API)",
+    })
 }
 
 export async function POST(req: Request) {
@@ -96,6 +173,14 @@ export async function POST(req: Request) {
                 })
                 model = openai.chat(modelId)
                 break
+            }
+
+            case "openai-codex": {
+                return await validateOpenAICodexStreaming({
+                    apiKey,
+                    modelId,
+                    baseUrl,
+                })
             }
 
             case "anthropic": {

@@ -35,6 +35,7 @@ import {
     setTraceOutput,
     wrapWithObserve,
 } from "@/lib/langfuse"
+import { OPENAI_CODEX_DEFAULT_INSTRUCTIONS } from "@/lib/openai-codex-protocol"
 import { findServerModelById } from "@/lib/server-model-config"
 import { getSystemPrompt } from "@/lib/system-prompts"
 import { getUserIdFromRequest } from "@/lib/user-id"
@@ -485,6 +486,30 @@ IMPORTANT: The "Current diagram XML" is the SINGLE SOURCE OF TRUTH for what's on
           ]
 
     const allMessages = [...systemMessages, ...enhancedMessages]
+    const openAICodexInstructions =
+        resolvedProvider === "openai-codex"
+            ? systemMessages
+                  .map((message) =>
+                      typeof message.content === "string"
+                          ? message.content.trim()
+                          : "",
+                  )
+                  .filter(Boolean)
+                  .join("\n\n") || OPENAI_CODEX_DEFAULT_INSTRUCTIONS
+            : undefined
+    const requestMessages =
+        resolvedProvider === "openai-codex" ? enhancedMessages : allMessages
+    const requestProviderOptions =
+        resolvedProvider === "openai-codex"
+            ? {
+                  ...(providerOptions || {}),
+                  openai: {
+                      ...(providerOptions?.openai || {}),
+                      instructions: openAICodexInstructions,
+                      store: false,
+                  },
+              }
+            : providerOptions
 
     const result = streamText({
         model,
@@ -561,8 +586,10 @@ IMPORTANT: The "Current diagram XML" is the SINGLE SOURCE OF TRUTH for what's on
             // Don't attempt to repair other errors (like NoSuchToolError)
             return null
         },
-        messages: allMessages,
-        ...(providerOptions && { providerOptions }), // This now includes all reasoning configs
+        messages: requestMessages,
+        ...(requestProviderOptions && {
+            providerOptions: requestProviderOptions,
+        }),
         ...(headers && { headers }),
         // Langfuse telemetry config (returns undefined if not configured)
         ...(getTelemetryConfig({ sessionId: validSessionId, userId }) && {

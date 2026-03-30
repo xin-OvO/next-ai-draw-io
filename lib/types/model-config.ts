@@ -2,6 +2,7 @@
 
 export type ProviderName =
     | "openai"
+    | "openai-codex"
     | "anthropic"
     | "google"
     | "vertexai"
@@ -36,6 +37,7 @@ export interface ProviderConfig {
     provider: ProviderName
     name?: string // Custom display name (e.g., "OpenAI Production")
     apiKey: string
+    authProfileId?: string
     baseUrl?: string
     // AWS Bedrock specific fields
     awsAccessKeyId?: string
@@ -64,6 +66,7 @@ export interface FlattenedModel {
     provider: ProviderName
     providerLabel: string // Provider display name
     apiKey: string
+    authProfileId?: string
     baseUrl?: string
     // AWS Bedrock specific fields
     awsAccessKeyId?: string
@@ -87,6 +90,7 @@ export interface FlattenedModel {
 // Map provider names to models.dev logo names
 export const PROVIDER_LOGO_MAP: Record<string, string> = {
     openai: "openai",
+    "openai-codex": "openai",
     anthropic: "anthropic",
     google: "google",
     azure: "azure",
@@ -111,6 +115,10 @@ export const PROVIDER_INFO: Record<
     openai: {
         label: "OpenAI",
         defaultBaseUrl: "https://api.openai.com/v1",
+    },
+    "openai-codex": {
+        label: "OpenAI Codex",
+        defaultBaseUrl: "https://chatgpt.com/backend-api",
     },
     anthropic: {
         label: "Anthropic",
@@ -202,6 +210,13 @@ export const SUGGESTED_MODELS: Partial<Record<ProviderName, string[]>> = {
         "gpt-4.1-nano",
         "gpt-4o",
         "gpt-4o-mini",
+    ],
+    "openai-codex": [
+        "gpt-5.4",
+        "gpt-5.3-codex",
+        "gpt-5.3-codex-spark",
+        "gpt-5.2-codex",
+        "gpt-5.1-codex",
     ],
     anthropic: [
         // Claude 4.5 series (latest)
@@ -402,6 +417,7 @@ export function flattenModels(config: MultiModelConfig): FlattenedModel[] {
                 provider: provider.provider,
                 providerLabel,
                 apiKey: provider.apiKey,
+                authProfileId: provider.authProfileId,
                 baseUrl: provider.baseUrl,
                 // AWS Bedrock fields
                 awsAccessKeyId: provider.awsAccessKeyId,

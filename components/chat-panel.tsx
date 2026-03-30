@@ -27,7 +27,10 @@ import { SettingsDialog } from "@/components/settings-dialog"
 import { useDiagram } from "@/contexts/diagram-context"
 import { useDiagramToolHandlers } from "@/hooks/use-diagram-tool-handlers"
 import { useDictionary } from "@/hooks/use-dictionary"
-import { getSelectedAIConfig, useModelConfig } from "@/hooks/use-model-config"
+import {
+    resolveSelectedAIConfig,
+    useModelConfig,
+} from "@/hooks/use-model-config"
 import { useSessionManager } from "@/hooks/use-session-manager"
 import { useValidateDiagram } from "@/hooks/use-validate-diagram"
 import { getApiEndpoint } from "@/lib/base-path"
@@ -1036,7 +1039,7 @@ export default function ChatPanel({
     }, [messages, addToolOutput, stop])
 
     // Send chat message with headers
-    const sendChatMessage = (
+    const sendChatMessage = async (
         parts: any,
         xml: string,
         previousXml: string,
@@ -1047,52 +1050,60 @@ export default function ChatPanel({
         continuationRetryCountRef.current = 0
         partialXmlRef.current = ""
 
-        const config = getSelectedAIConfig()
+        try {
+            const config = await resolveSelectedAIConfig()
 
-        sendMessage(
-            { parts },
-            {
-                body: { xml, previousXml, sessionId, customSystemMessage },
-                headers: {
-                    "x-access-code": config.accessCode,
-                    ...(config.aiProvider && {
-                        "x-ai-provider": config.aiProvider,
-                        ...(config.aiBaseUrl && {
-                            "x-ai-base-url": config.aiBaseUrl,
+            sendMessage(
+                { parts },
+                {
+                    body: { xml, previousXml, sessionId, customSystemMessage },
+                    headers: {
+                        "x-access-code": config.accessCode,
+                        ...(config.aiProvider && {
+                            "x-ai-provider": config.aiProvider,
+                            ...(config.aiBaseUrl && {
+                                "x-ai-base-url": config.aiBaseUrl,
+                            }),
+                            ...(config.aiApiKey && {
+                                "x-ai-api-key": config.aiApiKey,
+                            }),
+                            ...(config.aiModel && {
+                                "x-ai-model": config.aiModel,
+                            }),
+                            // AWS Bedrock credentials
+                            ...(config.awsAccessKeyId && {
+                                "x-aws-access-key-id": config.awsAccessKeyId,
+                            }),
+                            ...(config.awsSecretAccessKey && {
+                                "x-aws-secret-access-key":
+                                    config.awsSecretAccessKey,
+                            }),
+                            ...(config.awsRegion && {
+                                "x-aws-region": config.awsRegion,
+                            }),
+                            ...(config.awsSessionToken && {
+                                "x-aws-session-token": config.awsSessionToken,
+                            }),
+                            // Vertex AI credentials (Express Mode)
+                            ...(config.vertexApiKey && {
+                                "x-vertex-api-key": config.vertexApiKey,
+                            }),
                         }),
-                        ...(config.aiApiKey && {
-                            "x-ai-api-key": config.aiApiKey,
+                        // Send selected model ID for server model lookup (apiKeyEnv/baseUrlEnv)
+                        ...(config.selectedModelId && {
+                            "x-selected-model-id": config.selectedModelId,
                         }),
-                        ...(config.aiModel && { "x-ai-model": config.aiModel }),
-                        // AWS Bedrock credentials
-                        ...(config.awsAccessKeyId && {
-                            "x-aws-access-key-id": config.awsAccessKeyId,
+                        ...(minimalStyle && {
+                            "x-minimal-style": "true",
                         }),
-                        ...(config.awsSecretAccessKey && {
-                            "x-aws-secret-access-key":
-                                config.awsSecretAccessKey,
-                        }),
-                        ...(config.awsRegion && {
-                            "x-aws-region": config.awsRegion,
-                        }),
-                        ...(config.awsSessionToken && {
-                            "x-aws-session-token": config.awsSessionToken,
-                        }),
-                        // Vertex AI credentials (Express Mode)
-                        ...(config.vertexApiKey && {
-                            "x-vertex-api-key": config.vertexApiKey,
-                        }),
-                    }),
-                    // Send selected model ID for server model lookup (apiKeyEnv/baseUrlEnv)
-                    ...(config.selectedModelId && {
-                        "x-selected-model-id": config.selectedModelId,
-                    }),
-                    ...(minimalStyle && {
-                        "x-minimal-style": "true",
-                    }),
+                    },
                 },
-            },
-        )
+            )
+        } catch (error) {
+            toast.error(
+                error instanceof Error ? error.message : "认证失败，请重试。",
+            )
+        }
     }
 
     // Process files and append content to user text (handles PDF, text, and optionally images)

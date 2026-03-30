@@ -47,6 +47,7 @@
         "@langfuse/client": "^4.4.9",
         "@langfuse/otel": "^4.4.4",
         "@langfuse/tracing": "^4.4.9",
+        "@mariozechner/pi-ai": "^0.58.0",
         "@next/third-parties": "^16.0.6",
         "@opennextjs/cloudflare": "^1.17.1",
         "@openrouter/ai-sdk-provider": "^1.5.4",
