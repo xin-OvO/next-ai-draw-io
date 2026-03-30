@@ -188,6 +188,10 @@ export function ModelConfigDialog({
         error?: string
     } | null>(null)
     const [manualCodeInput, setManualCodeInput] = useState("")
+    const [manualAuthFilePath, setManualAuthFilePath] = useState("")
+    const [authFileLoading, setAuthFileLoading] = useState<
+        "detect" | "load" | null
+    >(null)
     const oauthPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
     const {
@@ -351,8 +355,73 @@ export function ModelConfigDialog({
         })
         setOauthSession(null)
         setManualCodeInput("")
-        toast.success("OpenAI Codex OAuth 已断开")
+        toast.success("已断开当前项目绑定，不会删除 ~/.codex/auth.json")
     }, [selectedProviderId, updateProvider])
+
+    const applyOpenAICodexAuthFile = useCallback(
+        async (params: { action: "detect" | "load"; path?: string }) => {
+            if (!selectedProviderId) return
+
+            try {
+                setAuthFileLoading(params.action)
+
+                const response = await fetch(
+                    getApiEndpoint("/api/openai-codex-auth-file"),
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(params),
+                    },
+                )
+                const data = await response.json()
+
+                if (!response.ok) {
+                    throw new Error(data.error || "导入认证文件失败")
+                }
+
+                const resolved = upsertOpenAICodexProfile({
+                    ...data.credentials,
+                    email: data.email,
+                })
+
+                updateProvider(selectedProviderId, {
+                    authProfileId: resolved.profileId,
+                    apiKey: "",
+                    validated: false,
+                })
+                setValidationStatus("idle")
+                setValidationError("")
+                if (params.action === "load") {
+                    setManualAuthFilePath(data.path || params.path || "")
+                }
+                toast.success(`已导入认证文件：${data.path}`)
+            } catch (error) {
+                toast.error(
+                    error instanceof Error ? error.message : "导入认证文件失败",
+                )
+            } finally {
+                setAuthFileLoading(null)
+            }
+        },
+        [selectedProviderId, updateProvider],
+    )
+
+    const handleDetectOpenAICodexAuthFile = useCallback(async () => {
+        await applyOpenAICodexAuthFile({ action: "detect" })
+    }, [applyOpenAICodexAuthFile])
+
+    const handleLoadOpenAICodexAuthFile = useCallback(async () => {
+        const path = manualAuthFilePath.trim()
+        if (!path) {
+            toast.error("请先输入 auth.json 路径")
+            return
+        }
+
+        await applyOpenAICodexAuthFile({
+            action: "load",
+            path,
+        })
+    }, [applyOpenAICodexAuthFile, manualAuthFilePath])
 
     // Get suggested models for current provider
     const suggestedModels = selectedProvider
@@ -447,13 +516,12 @@ export function ModelConfigDialog({
             if (!selectedProvider.vertexApiKey) {
                 return
             }
-        } else if (isOpenAICodex) {
-            if (!selectedProvider.authProfileId) {
-                setValidationError("Connect OpenAI Codex OAuth first")
-                setValidationStatus("error")
-                return
-            }
-        } else if (!isEdgeOne && !isOllama && !selectedProvider.apiKey) {
+        } else if (
+            !isEdgeOne &&
+            !isOllama &&
+            !isOpenAICodex &&
+            !selectedProvider.apiKey
+        ) {
             return
         }
 
@@ -1353,6 +1421,80 @@ export function ModelConfigDialog({
                                                                 )}
                                                             </div>
                                                         )}
+
+                                                        <div className="rounded-lg border border-border-subtle bg-surface-0/80 p-3 space-y-3">
+                                                            <div className="space-y-1">
+                                                                <p className="text-xs font-medium">
+                                                                    读取本地认证文件
+                                                                </p>
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    如果你本机
+                                                                    `~/.codex/auth.json`
+                                                                    已经登录过，也可以直接导入；或者手动输入任意
+                                                                    `auth.json`
+                                                                    路径。
+                                                                </p>
+                                                            </div>
+
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    onClick={
+                                                                        handleDetectOpenAICodexAuthFile
+                                                                    }
+                                                                    disabled={
+                                                                        authFileLoading !==
+                                                                        null
+                                                                    }
+                                                                >
+                                                                    {authFileLoading ===
+                                                                    "detect" ? (
+                                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                                    ) : (
+                                                                        "识别 ~/.codex/auth.json"
+                                                                    )}
+                                                                </Button>
+                                                            </div>
+
+                                                            <div className="flex flex-col gap-2 sm:flex-row">
+                                                                <Input
+                                                                    value={
+                                                                        manualAuthFilePath
+                                                                    }
+                                                                    onChange={(
+                                                                        e,
+                                                                    ) =>
+                                                                        setManualAuthFilePath(
+                                                                            e
+                                                                                .target
+                                                                                .value,
+                                                                        )
+                                                                    }
+                                                                    placeholder="/Users/you/.codex/auth.json"
+                                                                    className="h-9 font-mono text-xs"
+                                                                />
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    onClick={
+                                                                        handleLoadOpenAICodexAuthFile
+                                                                    }
+                                                                    disabled={
+                                                                        authFileLoading !==
+                                                                            null ||
+                                                                        !manualAuthFilePath.trim()
+                                                                    }
+                                                                >
+                                                                    {authFileLoading ===
+                                                                    "load" ? (
+                                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                                    ) : (
+                                                                        "导入指定文件"
+                                                                    )}
+                                                                </Button>
+                                                            </div>
+                                                        </div>
                                                     </div>
 
                                                     <div className="flex items-center gap-2">
@@ -1390,9 +1532,8 @@ export function ModelConfigDialog({
                                                                 handleValidate
                                                             }
                                                             disabled={
-                                                                !selectedProvider.authProfileId ||
                                                                 validationStatus ===
-                                                                    "validating"
+                                                                "validating"
                                                             }
                                                             className={cn(
                                                                 "h-9 px-4",
@@ -1432,6 +1573,14 @@ export function ModelConfigDialog({
                                                             </Button>
                                                         )}
                                                     </div>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        Disconnect
+                                                        只会解绑当前项目里的
+                                                        OpenAI Codex
+                                                        凭证，不会删除
+                                                        `~/.codex/auth.json` 或
+                                                        Codex 自己的登录态。
+                                                    </p>
                                                     {validationStatus ===
                                                         "error" &&
                                                         validationError && (

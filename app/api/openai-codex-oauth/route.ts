@@ -28,6 +28,14 @@ type OAuthSession = {
 
 const SESSION_TTL_MS = 15 * 60 * 1000
 
+function isPendingSession(status: OAuthSessionStatus): boolean {
+    return (
+        status === "starting" ||
+        status === "awaiting_browser" ||
+        status === "awaiting_manual_input"
+    )
+}
+
 function getSessionStore(): Map<string, OAuthSession> {
     const globalWithStore = globalThis as typeof globalThis & {
         __openaiCodexOAuthSessions?: Map<string, OAuthSession>
@@ -69,6 +77,15 @@ async function startSession(): Promise<OAuthSession> {
     cleanupExpiredSessions()
 
     const sessions = getSessionStore()
+    const existingPendingSession = [...sessions.values()]
+        .filter((session) => isPendingSession(session.status))
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+
+    if (existingPendingSession) {
+        existingPendingSession.updatedAt = Date.now()
+        return existingPendingSession
+    }
+
     const sessionId = randomUUID()
     const session: OAuthSession = {
         id: sessionId,

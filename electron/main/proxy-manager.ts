@@ -6,7 +6,6 @@ import type { ProxyConfig } from "../electron.d"
 export type { ProxyConfig }
 
 const CONFIG_FILE = "proxy-config.json"
-
 function getConfigPath(): string {
     return path.join(app.getPath("userData"), CONFIG_FILE)
 }

@@ -4,6 +4,10 @@
     "license": "Apache-2.0",
     "private": true,
     "main": "dist-electron/main/index.js",
+    "repository": {
+        "type": "git",
+        "url": "git@github.com:xin-OvO/next-ai-draw-io.git"
+    },
     "scripts": {
         "dev": "next dev --turbopack --port 6002",
         "build": "next build",
@@ -17,16 +21,17 @@
         "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
         "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
         "electron:dev": "node scripts/electron-dev.mjs",
-        "electron:build": "npm run build && npm run electron:compile",
+        "electron:clean": "npx shx rm -rf .next dist-electron electron-standalone release",
+        "electron:build": "npm run electron:clean && npm run build && npm run electron:compile",
         "electron:compile": "npx esbuild electron/main/index.ts electron/preload/index.ts electron/preload/settings.ts --bundle --platform=node --outdir=dist-electron --external:electron --sourcemap --packages=external && npx shx cp -r electron/settings dist-electron/",
         "electron:start": "npx cross-env NODE_ENV=development npx electron .",
         "electron:prepare": "node scripts/prepare-electron-build.mjs",
-        "dist": "npm run electron:build && npm run electron:prepare && npx electron-builder --config electron/electron-builder.yml",
-        "dist:mac": "npm run electron:build && npm run electron:prepare && npx electron-builder --config electron/electron-builder.yml --mac",
+        "dist": "npm run electron:build && npm run electron:prepare && npx electron-builder --config electron/electron-builder.yml --publish never",
+        "dist:mac": "npm run electron:build && npm run electron:prepare && npx electron-builder --config electron/electron-builder.yml --mac --publish never",
         "dist:win": "npm run electron:build && npm run electron:prepare && npx electron-builder --config electron/electron-builder.yml --win",
         "dist:win:build": "npm run electron:build && npm run electron:prepare && npx electron-builder --config electron/electron-builder.yml --win --publish never",
-        "dist:linux": "npm run electron:build && npm run electron:prepare && npx electron-builder --config electron/electron-builder.yml --linux",
-        "dist:all": "npm run electron:build && npm run electron:prepare && npx electron-builder --config electron/electron-builder.yml --mac --win --linux",
+        "dist:linux": "npm run electron:build && npm run electron:prepare && npx electron-builder --config electron/electron-builder.yml --linux --publish never",
+        "dist:all": "npm run electron:build && npm run electron:prepare && npx electron-builder --config electron/electron-builder.yml --mac --win --linux --publish never",
         "test": "vitest",
         "test:e2e": "playwright test"
     },

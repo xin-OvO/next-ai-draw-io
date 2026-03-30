@@ -16,6 +16,7 @@ import {
     OPENAI_CODEX_DEFAULT_INSTRUCTIONS,
     resolveOpenAICodexResponsesUrl,
 } from "@/lib/openai-codex-protocol"
+import { resolveServerOpenAICodexAuth } from "@/lib/openai-codex-server-auth"
 import { allowPrivateUrls, isPrivateUrl } from "@/lib/ssrf-protection"
 import { PROVIDER_INFO, type ProviderName } from "@/lib/types/model-config"
 
@@ -110,7 +111,6 @@ export async function POST(req: Request) {
         const body: ValidateRequest = await req.json()
         const {
             provider,
-            apiKey,
             baseUrl,
             modelId,
             awsAccessKeyId,
@@ -119,6 +119,7 @@ export async function POST(req: Request) {
             // Note: Express Mode only needs vertexApiKey
             vertexApiKey,
         } = body
+        let apiKey = body.apiKey
 
         if (!provider || !modelId) {
             return NextResponse.json(
@@ -156,6 +157,9 @@ export async function POST(req: Request) {
                     { status: 400 },
                 )
             }
+        } else if (provider === "openai-codex" && !apiKey) {
+            const resolved = await resolveServerOpenAICodexAuth()
+            apiKey = resolved.apiKey
         } else if (provider !== "ollama" && provider !== "edgeone" && !apiKey) {
             return NextResponse.json(
                 { valid: false, error: "API key is required" },

@@ -36,6 +36,7 @@ import {
     wrapWithObserve,
 } from "@/lib/langfuse"
 import { OPENAI_CODEX_DEFAULT_INSTRUCTIONS } from "@/lib/openai-codex-protocol"
+import { resolveServerOpenAICodexAuth } from "@/lib/openai-codex-server-auth"
 import { findServerModelById } from "@/lib/server-model-config"
 import { getSystemPrompt } from "@/lib/system-prompts"
 import { getUserIdFromRequest } from "@/lib/user-id"
@@ -212,11 +213,18 @@ async function handleChatRequest(req: Request): Promise<Response> {
         }
     }
 
+    let openAICodexApiKey = req.headers.get("x-ai-api-key")
+    const effectiveProvider = serverModelConfig.provider || provider
+    if (effectiveProvider === "openai-codex" && !openAICodexApiKey) {
+        const resolved = await resolveServerOpenAICodexAuth()
+        openAICodexApiKey = resolved.apiKey
+    }
+
     const clientOverrides = {
         // Server model provider takes precedence over client header
-        provider: serverModelConfig.provider || provider,
+        provider: effectiveProvider,
         baseUrl,
-        apiKey: req.headers.get("x-ai-api-key"),
+        apiKey: openAICodexApiKey || req.headers.get("x-ai-api-key"),
         modelId: req.headers.get("x-ai-model"),
         // AWS Bedrock credentials
         awsAccessKeyId: req.headers.get("x-aws-access-key-id"),

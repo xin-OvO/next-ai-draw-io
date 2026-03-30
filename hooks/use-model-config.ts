@@ -508,7 +508,7 @@ export async function resolveSelectedAIConfig(): Promise<{
     }
 
     if (!config.aiAuthProfileId) {
-        throw new Error("请先连接 OpenAI Codex OAuth。")
+        return config
     }
 
     const resolved = await resolveOpenAICodexAuth(config.aiAuthProfileId)
